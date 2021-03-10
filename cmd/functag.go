@@ -35,14 +35,7 @@ func declRecvName(decl *ast.FuncDecl) string {
 	return ""
 }
 
-func handleDecl(decl *ast.FuncDecl) *fn {
-	if decl.Doc == nil {
-		return nil
-	}
-	if decl.Recv == nil {
-		return nil
-	}
-
+func filterTagComments(decl *ast.FuncDecl) []string {
 	var tagComments []string
 	for k := range decl.Doc.List {
 		comment := decl.Doc.List[k].Text
@@ -50,6 +43,14 @@ func handleDecl(decl *ast.FuncDecl) *fn {
 			tagComments = append(tagComments, strings.TrimSpace(comment[3:]))
 		}
 	}
+	return tagComments
+}
+
+func handleDecl(decl *ast.FuncDecl) *fn {
+	if decl.Doc == nil || decl.Recv == nil  {
+		return nil
+	}
+	var tagComments = filterTagComments(decl)
 	if len(tagComments) > 0 {
 		return &fn{
 			Dest:     declRecvName(decl),
@@ -61,6 +62,16 @@ func handleDecl(decl *ast.FuncDecl) *fn {
 	return nil
 }
 
+func packageFuncDeclsForEach(pkg *packages.Package, fn func(*ast.FuncDecl)) {
+	for i := range pkg.Syntax {
+		for j := range pkg.Syntax[i].Decls {
+			if decl, ok := pkg.Syntax[i].Decls[j].(*ast.FuncDecl); ok {
+				fn(decl)
+			}
+		}
+	}
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		log.Fatal("expecting output filename")
@@ -68,24 +79,22 @@ func main() {
 	fileName := os.Args[1]
 
 	cfg := &packages.Config{
-		Mode: packages.LoadSyntax,
+		Mode: packages.LoadSyntax ,
 	}
 	pkgs, err := packages.Load(cfg, ".")
+
 	if err != nil {
 		log.Fatal(err)
 	}
 	data := tplData{
 		PackageName: pkgs[0].Name,
 	}
-	for i := range pkgs[0].Syntax {
-		for j := range pkgs[0].Syntax[i].Decls {
-			if decl, ok := pkgs[0].Syntax[i].Decls[j].(*ast.FuncDecl); ok {
-				if fn := handleDecl(decl); fn != nil {
-					data.Funcs = append(data.Funcs, fn)
-				}
-			}
+	packageFuncDeclsForEach(pkgs[0], func(decl *ast.FuncDecl) {
+		if fn := handleDecl(decl); fn != nil {
+			data.Funcs = append(data.Funcs, fn)
 		}
-	}
+	})
+
 	f, err := os.Create(fileName)
 	if err != nil {
 		log.Fatal(err)
